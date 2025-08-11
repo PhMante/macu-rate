@@ -21,7 +21,6 @@ var db *sql.DB
 var adminPassword string
 
 func main() {
-	// Database connection
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		log.Fatal("DATABASE_URL environment variable not set")
@@ -31,30 +30,25 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = db.Ping()
-	if err != nil {
+	if err = db.Ping(); err != nil {
 		log.Fatal(err)
 	}
 
-	// Admin password from environment
 	adminPassword = os.Getenv("ADMIN_PASSWORD")
 	if adminPassword == "" {
 		log.Fatal("ADMIN_PASSWORD environment variable not set")
 	}
 
-	// Create tables
 	createTables()
 
-	// Routes
 	http.HandleFunc("/", homeHandler)
 	http.HandleFunc("/admin", adminHandler)
 	http.HandleFunc("/admin/add", adminAddHandler)
-	http.HandleFunc("/admin/sort", adminSortHandler) // NEW: set global sort
+	http.HandleFunc("/admin/sort", adminSortHandler)
 	http.HandleFunc("/vote", voteHandler)
 	http.HandleFunc("/comments", commentsHandler)
 	http.HandleFunc("/images/", imageHandler)
 
-	// Static
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 
 	port := os.Getenv("PORT")
@@ -65,95 +59,10 @@ func main() {
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
 
-func createTables() {
-	_, err := db.Exec(`
-    CREATE TABLE IF NOT EXISTS people (
-        id SERIAL PRIMARY KEY,
-        name TEXT NOT NULL,
-        image BYTEA
-    );
-    CREATE TABLE IF NOT EXISTS votes (
-        id SERIAL PRIMARY KEY,
-        person_id INTEGER REFERENCES people(id) ON DELETE CASCADE,
-        upvote BOOLEAN,
-        comment TEXT
-    );
-    `)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Global settings for the site (e.g., sort order)
-	_, err = db.Exec(`
-    CREATE TABLE IF NOT EXISTS settings (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-    );
-    `)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Ensure a default sort order exists
-	_, err = db.Exec(`
-    INSERT INTO settings (key, value)
-    VALUES ('sort_order', 'name')
-    ON CONFLICT (key) DO NOTHING;
-    `)
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func adminHandler(w http.ResponseWriter, r *http.Request) {
-	pass := r.URL.Query().Get("pass")
-	if pass != adminPassword {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-	tmpl := template.Must(template.ParseFiles("templates/admin.html"))
-	// Provide the pass to the template so hidden inputs have the correct value
-	data := map[string]string{
-		"AdminPass": pass,
-	}
-	if err := tmpl.Execute(w, data); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-}
-
-func adminAddHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", 405)
-		return
-	}
-	pass := r.FormValue("pass")
-	if pass != adminPassword {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	name := r.FormValue("name")
-	file, _, err := r.FormFile("image")
-	if err != nil {
-		http.Error(w, "Image upload failed: "+err.Error(), 400)
-		return
-	}
-	defer file.Close()
-	buf := bytes.NewBuffer(nil)
-	io.Copy(buf, file)
-
-	_, err = db.Exec("INSERT INTO people (name, image) VALUES ($1, $2)", name, buf.Bytes())
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-
-	http.Redirect(w, r, "/", http.StatusSeeOther)
-}
-
+// Set the global sort order (admin-only)
 func adminSortHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", 405)
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	pass := r.FormValue("pass")
@@ -163,7 +72,7 @@ func adminSortHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	order := r.FormValue("order")
-	// Whitelist supported orders to avoid injection
+	// Whitelist supported orders
 	switch order {
 	case "name", "score_desc", "upvotes_desc":
 		// ok
@@ -172,259 +81,89 @@ func adminSortHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := db.Exec("UPDATE settings SET value=$1 WHERE key='sort_order'", order)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
+	if _, err := db.Exec("UPDATE settings SET value=$1 WHERE key='sort_order'", order); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	http.Redirect(w, r, "/admin?pass="+pass, http.StatusSeeOther)
 }
 
+// Record a vote with optional comment
 func voteHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", 405)
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	personID, _ := strconv.Atoi(r.FormValue("person_id"))
+
+	personIDStr := r.FormValue("person_id")
+	personID, err := strconv.Atoi(personIDStr)
+	if err != nil || personID <= 0 {
+		http.Error(w, "Invalid person_id", http.StatusBadRequest)
+		return
+	}
+
 	upvote := r.FormValue("vote") == "up"
 	comment := r.FormValue("comment")
 
-	_, err := db.Exec("INSERT INTO votes (person_id, upvote, comment) VALUES ($1, $2, $3)",
-		personID, upvote, comment)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
+	if _, err := db.Exec(
+		"INSERT INTO votes (person_id, upvote, comment) VALUES ($1, $2, $3)",
+		personID, upvote, comment,
+	); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	w.WriteHeader(http.StatusOK)
 }
 
+// Return simple HTML with comments for a person
 func commentsHandler(w http.ResponseWriter, r *http.Request) {
-	personID, _ := strconv.Atoi(r.URL.Query().Get("person_id"))
-	rows, err := db.Query("SELECT upvote, comment FROM votes WHERE person_id=$1", personID)
+	personID, err := strconv.Atoi(r.URL.Query().Get("person_id"))
+	if err != nil || personID <= 0 {
+		http.Error(w, "Invalid person_id", http.StatusBadRequest)
+		return
+	}
+
+	rows, err := db.Query("SELECT upvote, comment FROM votes WHERE person_id = $1 ORDER BY id DESC", personID)
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
 
 	type Comment struct {
-		Upvote  bool
-		Comment string
+		IsUpvote bool
+		Text     string
 	}
-	var comments []Comment
+	var list []Comment
 	for rows.Next() {
 		var c Comment
-		rows.Scan(&c.Upvote, &c.Comment)
-		comments = append(comments, c)
-	}
-	tmpl := `
-    <html><body>
-    {{range .}}
-        <p>{{if .Upvote}}⬆️{{else}}⬇️{{end}} {{.Comment}}</p>
-    {{end}}
-    </body></html>`
-	template.Must(template.New("comments").Parse(tmpl)).Execute(w, comments)
-}
-
-func applyEXIFOrientation(img image.Image, orientation int) image.Image {
-	switch orientation {
-	case 1:
-		return img
-	case 2: // mirror horizontal
-		return flipHorizontal(img)
-	case 3: // rotate 180
-		return rotate180(img)
-	case 4: // mirror vertical
-		return flipVertical(img)
-	case 5: // mirror horizontal + rotate 270 CW (transpose)
-		return rotate90CW(flipHorizontal(img))
-	case 6: // rotate 90 CW
-		return rotate90CW(img)
-	case 7: // mirror horizontal + rotate 90 CW (transverse)
-		return rotate270CW(flipHorizontal(img))
-	case 8: // rotate 270 CW
-		return rotate270CW(img)
-	default:
-		return img
-	}
-}
-
-// Helpers for transforms
-func flipHorizontal(src image.Image) image.Image {
-	b := src.Bounds()
-	dst := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
-	for y := b.Min.Y; y < b.Max.Y; y++ {
-		for x := b.Min.X; x < b.Max.X; x++ {
-			dst.Set(b.Max.X-1-(x-b.Min.X), y-b.Min.Y, src.At(x, y))
+		if err := rows.Scan(&c.IsUpvote, &c.Text); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
+		list = append(list, c)
 	}
-	return dst
-}
-func flipVertical(src image.Image) image.Image {
-	b := src.Bounds()
-	dst := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
-	for y := b.Min.Y; y < b.Max.Y; y++ {
-		for x := b.Min.X; x < b.Max.X; x++ {
-			dst.Set(x-b.Min.X, b.Max.Y-1-(y-b.Min.Y), src.At(x, y))
-		}
-	}
-	return dst
-}
-func rotate180(src image.Image) image.Image {
-	return rotate90CW(rotate90CW(src))
-}
-func rotate90CW(src image.Image) image.Image {
-	b := src.Bounds()
-	w, h := b.Dx(), b.Dy()
-	dst := image.NewRGBA(image.Rect(0, 0, h, w))
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			dst.Set(h-1-y, x, src.At(b.Min.X+x, b.Min.Y+y))
-		}
-	}
-	return dst
-}
-func rotate270CW(src image.Image) image.Image {
-	// 270 CW = 90 CCW
-	b := src.Bounds()
-	w, h := b.Dx(), b.Dy()
-	dst := image.NewRGBA(image.Rect(0, 0, h, w))
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			dst.Set(y, w-1-x, src.At(b.Min.X+x, b.Min.Y+y))
-		}
-	}
-	return dst
-}
 
-func imageHandler(w http.ResponseWriter, r *http.Request) {
-	idStr := r.URL.Path[len("/images/"):]
-	id, _ := strconv.Atoi(idStr)
-
-	var imgBytes []byte
-	err := db.QueryRow("SELECT image FROM people WHERE id=$1", id).Scan(&imgBytes)
-	if err != nil {
-		http.Error(w, "Image not found", http.StatusNotFound)
+	// Minimal inline template to match the modal usage
+	const tmpl = `
+		<div>
+			{{if .}}
+				{{range .}}
+					<p>{{if .IsUpvote}}<span style="color:green">👍</span>{{else}}<span style="color:red">👎</span>{{end}} {{.Text}}</p>
+				{{end}}
+			{{else}}
+				<p>No comments yet.</p>
+			{{end}}
+		</div>`
+	if err := template.Must(template.New("comments").Parse(tmpl)).Execute(w, list); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	// Detect format via DecodeConfig
-	cfg, format, cfgErr := image.DecodeConfig(bytes.NewReader(imgBytes))
-	if cfgErr != nil {
-		// Unknown data: just stream as-is with sniffed type
-		ct := "application/octet-stream"
-		if len(imgBytes) >= 512 {
-			ct = http.DetectContentType(imgBytes[:512])
-		}
-		w.Header().Set("Content-Type", ct)
-		w.Header().Set("Cache-Control", "public, max-age=86400")
-		w.Write(imgBytes)
-		return
-	}
-
-	// Non-JPEGs: serve original bytes unchanged
-	if format != "jpeg" && format != "jpg" {
-		ct := contentTypeFromFormat(format, imgBytes)
-		w.Header().Set("Content-Type", ct)
-		w.Header().Set("Cache-Control", "public, max-age=86400")
-		w.Write(imgBytes)
-		return
-	}
-
-	// JPEG path: honor EXIF orientation
-	orientation := 1
-	if ex, err := exif.Decode(bytes.NewReader(imgBytes)); err == nil {
-		if tag, err := ex.Get(exif.Orientation); err == nil && tag != nil {
-			if v, err := tag.Int(0); err == nil && v >= 1 && v <= 8 {
-				orientation = v
-			}
-		}
-	}
-
-	// Target size from query (defaults)
-	q := r.URL.Query()
-	maxW, _ := strconv.Atoi(q.Get("w"))
-	maxH, _ := strconv.Atoi(q.Get("h"))
-	if maxW <= 0 {
-		maxW = 512
-	}
-	if maxH <= 0 {
-		maxH = 512
-	}
-
-	// If already small enough and orientation is normal, stream original
-	if cfg.Width <= maxW && cfg.Height <= maxH && orientation == 1 {
-		w.Header().Set("Content-Type", "image/jpeg")
-		w.Header().Set("Cache-Control", "public, max-age=86400")
-		w.Write(imgBytes)
-		return
-	}
-
-	// Decode full image
-	src, _, err := image.Decode(bytes.NewReader(imgBytes))
-	if err != nil {
-		http.Error(w, "Failed to decode image", http.StatusInternalServerError)
-		return
-	}
-
-	// Apply EXIF orientation before resizing
-	src = applyEXIFOrientation(src, orientation)
-
-	// Compute scaled size
-	dstW, dstH := fitWithin(src.Bounds().Dx(), src.Bounds().Dy(), maxW, maxH)
-
-	// Resize with high-quality resampling
-	dst := image.NewRGBA(image.Rect(0, 0, dstW, dstH))
-	draw.ApproxBiLinear.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Over, nil)
-
-	// Encode as JPEG
-	var out bytes.Buffer
-	if err := jpeg.Encode(&out, dst, &jpeg.Options{Quality: 80}); err != nil {
-		http.Error(w, "Failed to encode image", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "image/jpeg")
-	w.Header().Set("Cache-Control", "public, max-age=86400")
-	w.Write(out.Bytes())
 }
 
-// fitWithin keeps aspect ratio while fitting within maxW x maxH
-func fitWithin(w, h, maxW, maxH int) (int, int) {
-	if w <= 0 || h <= 0 {
-		return maxW, maxH
-	}
-	rw := float64(maxW) / float64(w)
-	rh := float64(maxH) / float64(h)
-	scale := rw
-	if rh < rw {
-		scale = rh
-	}
-	if scale > 1 {
-		// Don't upscale
-		return w, h
-	}
-	return int(float64(w) * scale), int(float64(h) * scale)
-}
-
-func contentTypeFromFormat(format string, data []byte) string {
-	switch format {
-	case "jpeg", "jpg":
-		return "image/jpeg"
-	case "png":
-		return "image/png"
-	case "gif":
-		return "image/gif"
-	default:
-		// Try sniffing; fallback to jpeg if unknown
-		if len(data) >= 512 {
-			return http.DetectContentType(data[:512])
-		}
-		return "image/jpeg"
-	}
-}
-
+// Helper to read current sort order from settings (defaults to "name")
 func getSortOrder() string {
 	var order string
 	_ = db.QueryRow("SELECT value FROM settings WHERE key='sort_order'").Scan(&order)
@@ -435,17 +174,16 @@ func getSortOrder() string {
 }
 
 func homeHandler(w http.ResponseWriter, r *http.Request) {
-	// First, get all people with their vote stats
 	type Person struct {
 		ID      int
 		Name    string
-		Score   int // net score: upvotes - downvotes
+		Score   int // upvotes - downvotes
 		Upvotes int // number of positive votes
 	}
 
 	sortOrder := getSortOrder()
 
-	// Build ORDER BY safely via a whitelist
+	// Whitelist ORDER BY to avoid injection
 	orderByClause := "p.name"
 	switch sortOrder {
 	case "score_desc":
@@ -456,9 +194,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 		orderByClause = "p.name"
 	}
 
-	// IMPORTANT: Handle NULLs from the LEFT JOIN as 0, not -1
-	// - Score:  +1 for true, -1 for false, 0 for NULL
-	// - Upvotes: +1 for true, 0 otherwise (including NULL)
+	// Correctly treat NULL vote rows as 0 (not -1)
 	query := `
         SELECT p.id,
                p.name,
@@ -501,4 +237,268 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 	if err := tmpl.Execute(w, people); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+func createTables() {
+	_, err := db.Exec(`
+    CREATE TABLE IF NOT EXISTS people (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        image BYTEA
+    );
+    CREATE TABLE IF NOT EXISTS votes (
+        id SERIAL PRIMARY KEY,
+        person_id INTEGER REFERENCES people(id) ON DELETE CASCADE,
+        upvote BOOLEAN,
+        comment TEXT
+    );
+    `)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	_, err = db.Exec(`
+    CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+    `)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	_, err = db.Exec(`
+    INSERT INTO settings (key, value)
+    VALUES ('sort_order', 'name')
+    ON CONFLICT (key) DO NOTHING;
+    `)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func adminHandler(w http.ResponseWriter, r *http.Request) {
+	pass := r.URL.Query().Get("pass")
+	if pass != adminPassword {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	tmpl := template.Must(template.ParseFiles("templates/admin.html"))
+	data := map[string]string{
+		"AdminPass": pass,
+	}
+	if err := tmpl.Execute(w, data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// Admin upload: normalize JPEGs to 512x512 (respect EXIF orientation).
+// Non-JPEGs: store bytes exactly as uploaded.
+func adminAddHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	pass := r.FormValue("pass")
+	if pass != adminPassword {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	name := r.FormValue("name")
+	file, _, err := r.FormFile("image")
+	if err != nil {
+		http.Error(w, "Image upload failed: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	// Read all bytes
+	buf := bytes.NewBuffer(nil)
+	if _, err := io.Copy(buf, file); err != nil {
+		http.Error(w, "Failed to read image", http.StatusInternalServerError)
+		return
+	}
+	imgBytes := buf.Bytes()
+
+	// Detect format quickly
+	_, format, cfgErr := image.DecodeConfig(bytes.NewReader(imgBytes))
+	if cfgErr != nil {
+		// If unknown, just store as-is (safer fallback)
+		if _, err := db.Exec("INSERT INTO people (name, image) VALUES ($1, $2)", name, imgBytes); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	if format == "jpeg" || format == "jpg" {
+		processed, err := processJPEGForDB(imgBytes, 512, 512)
+		if err != nil {
+			http.Error(w, "Failed to process image: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_, err = db.Exec("INSERT INTO people (name, image) VALUES ($1, $2)", name, processed)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// For non-JPEG images, store exactly as uploaded
+		_, err = db.Exec("INSERT INTO people (name, image) VALUES ($1, $2)", name, imgBytes)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// Reverted: serve images exactly as stored, no processing
+func imageHandler(w http.ResponseWriter, r *http.Request) {
+	idStr := r.URL.Path[len("/images/"):]
+	id, _ := strconv.Atoi(idStr)
+
+	var img []byte
+	err := db.QueryRow("SELECT image FROM people WHERE id=$1", id).Scan(&img)
+	if err != nil {
+		http.Error(w, "Image not found", http.StatusNotFound)
+		return
+	}
+
+	// Best-effort content-type sniff
+	ct := "application/octet-stream"
+	if len(img) >= 512 {
+		ct = http.DetectContentType(img[:512])
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Write(img)
+}
+
+// Read EXIF orientation, rotate/flip, resize to fit within maxW x maxH, encode JPEG (quality 80).
+func processJPEGForDB(srcBytes []byte, maxW, maxH int) ([]byte, error) {
+	orientation := 1
+	if ex, err := exif.Decode(bytes.NewReader(srcBytes)); err == nil {
+		if tag, err := ex.Get(exif.Orientation); err == nil && tag != nil {
+			if v, err := tag.Int(0); err == nil && v >= 1 && v <= 8 {
+				orientation = v
+			}
+		}
+	}
+
+	srcImg, _, err := image.Decode(bytes.NewReader(srcBytes))
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply EXIF orientation
+	srcImg = applyEXIFOrientation(srcImg, orientation)
+
+	w := srcImg.Bounds().Dx()
+	h := srcImg.Bounds().Dy()
+	dstW, dstH := fitWithin(w, h, maxW, maxH) // no upscaling
+
+	// If already within bounds, still re-encode to strip large metadata and normalize
+	dst := image.NewRGBA(image.Rect(0, 0, dstW, dstH))
+	draw.ApproxBiLinear.Scale(dst, dst.Bounds(), srcImg, srcImg.Bounds(), draw.Over, nil)
+
+	var out bytes.Buffer
+	if err := jpeg.Encode(&out, dst, &jpeg.Options{Quality: 80}); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
+// Orientation handling utilities
+func applyEXIFOrientation(img image.Image, orientation int) image.Image {
+	switch orientation {
+	case 1:
+		return img
+	case 2:
+		return flipHorizontal(img)
+	case 3:
+		return rotate180(img)
+	case 4:
+		return flipVertical(img)
+	case 5:
+		return rotate90CW(flipHorizontal(img))
+	case 6:
+		return rotate90CW(img)
+	case 7:
+		return rotate270CW(flipHorizontal(img))
+	case 8:
+		return rotate270CW(img)
+	default:
+		return img
+	}
+}
+
+func flipHorizontal(src image.Image) image.Image {
+	b := src.Bounds()
+	dst := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			dst.Set(b.Max.X-1-(x-b.Min.X), y-b.Min.Y, src.At(x, y))
+		}
+	}
+	return dst
+}
+
+func flipVertical(src image.Image) image.Image {
+	b := src.Bounds()
+	dst := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			dst.Set(x-b.Min.X, b.Max.Y-1-(y-b.Min.Y), src.At(x, y))
+		}
+	}
+	return dst
+}
+
+func rotate180(src image.Image) image.Image {
+	return rotate90CW(rotate90CW(src))
+}
+
+func rotate90CW(src image.Image) image.Image {
+	b := src.Bounds()
+	w, h := b.Dx(), b.Dy()
+	dst := image.NewRGBA(image.Rect(0, 0, h, w))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			dst.Set(h-1-y, x, src.At(b.Min.X+x, b.Min.Y+y))
+		}
+	}
+	return dst
+}
+
+func rotate270CW(src image.Image) image.Image {
+	b := src.Bounds()
+	w, h := b.Dx(), b.Dy()
+	dst := image.NewRGBA(image.Rect(0, 0, h, w))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			dst.Set(y, w-1-x, src.At(b.Min.X+x, b.Min.Y+y))
+		}
+	}
+	return dst
+}
+
+// Keep aspect ratio and fit within bounds. Never upscale.
+func fitWithin(w, h, maxW, maxH int) (int, int) {
+	if w <= 0 || h <= 0 {
+		return maxW, maxH
+	}
+	rw := float64(maxW) / float64(w)
+	rh := float64(maxH) / float64(h)
+	scale := rw
+	if rh < rw {
+		scale = rh
+	}
+	if scale > 1 {
+		return w, h // no upscaling
+	}
+	return int(float64(w) * scale), int(float64(h) * scale)
 }
