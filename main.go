@@ -237,7 +237,29 @@ func imageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read optional width/height; default to 512px for each dimension
+	// Detect image format
+	cfg, format, cfgErr := image.DecodeConfig(bytes.NewReader(imgBytes))
+	if cfgErr != nil {
+		// If we can't decode config, try to stream as-is with sniffed content type
+		ct := "application/octet-stream"
+		if len(imgBytes) >= 512 {
+			ct = http.DetectContentType(imgBytes[:512])
+		}
+		w.Header().Set("Content-Type", ct)
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Write(imgBytes)
+		return
+	}
+
+	// If not JPEG, serve original bytes as-is.
+	if format != "jpeg" && format != "jpg" {
+		w.Header().Set("Content-Type", contentTypeFromFormat(format, imgBytes))
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Write(imgBytes)
+		return
+	}
+
+	// JPEG: allow downscaling
 	q := r.URL.Query()
 	maxW, _ := strconv.Atoi(q.Get("w"))
 	maxH, _ := strconv.Atoi(q.Get("h"))
@@ -248,38 +270,25 @@ func imageHandler(w http.ResponseWriter, r *http.Request) {
 		maxH = 512
 	}
 
-	// Fast path: only read config to decide if resize is needed
-	cfg, format, err := image.DecodeConfig(bytes.NewReader(imgBytes))
-	if err != nil {
-		// If config fails (corrupt?), fallback to serving as JPEG after decode attempt
-		format = "jpeg"
-	}
-
-	// If already small enough, serve original (preserve original content type if detectable)
-	if err == nil && cfg.Width <= maxW && cfg.Height <= maxH {
-		ct := contentTypeFromFormat(format, imgBytes)
-		w.Header().Set("Content-Type", ct)
-		// Optional caching
+	// If already small enough, serve original
+	if cfg.Width <= maxW && cfg.Height <= maxH {
+		w.Header().Set("Content-Type", "image/jpeg")
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		w.Write(imgBytes)
 		return
 	}
 
-	// Decode full image
-	src, format, err := image.Decode(bytes.NewReader(imgBytes))
+	// Decode and resize only for JPEG
+	src, _, err := image.Decode(bytes.NewReader(imgBytes))
 	if err != nil {
 		http.Error(w, "Failed to decode image", http.StatusInternalServerError)
 		return
 	}
 
-	// Compute scaled size while keeping aspect ratio
 	dstW, dstH := fitWithin(src.Bounds().Dx(), src.Bounds().Dy(), maxW, maxH)
-
-	// Resize using high-quality resampling
 	dst := image.NewRGBA(image.Rect(0, 0, dstW, dstH))
 	draw.ApproxBiLinear.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Over, nil)
 
-	// Encode as JPEG for bandwidth efficiency
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 80}); err != nil {
 		http.Error(w, "Failed to encode image", http.StatusInternalServerError)
