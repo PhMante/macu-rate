@@ -108,7 +108,37 @@
 
   <!-- Add your existing modal scripts here for vote/comment -->
   <script>
-// ... your modal logic ...
+    function openVoteModal(personID, voteType) {
+      const comment = prompt(`Write a comment for your ${voteType}vote:`)
+      if (comment === null) return // user cancelled
+
+      fetch('/vote', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: new URLSearchParams({
+          person_id: personID,
+          vote: voteType,
+          comment: comment
+        })
+      }).then(res => {
+        if (res.ok) {
+          alert('Thanks for your vote!')
+          location.reload()
+        } else {
+          alert('Failed to submit vote.')
+        }
+      }).catch(() => alert('Network error'))
+    }
+
+    function openCommentsModal(personID) {
+      fetch(`/comments?person_id=${personID}`)
+        .then(res => res.text())
+        .then(html => {
+          const w = window.open("", "Comments", "width=400,height=400,scrollbars=yes")
+          w.document.write(html)
+          w.document.close()
+        }).catch(() => alert('Failed to load comments'))
+    }
   </script>
 
 </body>
