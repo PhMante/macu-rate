@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"database/sql"
 	"html/template"
+	"image"
+	"image/jpeg"
 	"io"
 	"log"
 	"net/http"
@@ -11,6 +13,7 @@ import (
 	"strconv"
 
 	_ "github.com/lib/pq"
+	"golang.org/x/image/draw"
 )
 
 var db *sql.DB
@@ -227,14 +230,100 @@ func imageHandler(w http.ResponseWriter, r *http.Request) {
 	idStr := r.URL.Path[len("/images/"):]
 	id, _ := strconv.Atoi(idStr)
 
-	var img []byte
-	err := db.QueryRow("SELECT image FROM people WHERE id=$1", id).Scan(&img)
+	var imgBytes []byte
+	err := db.QueryRow("SELECT image FROM people WHERE id=$1", id).Scan(&imgBytes)
 	if err != nil {
-		http.Error(w, "Image not found", 404)
+		http.Error(w, "Image not found", http.StatusNotFound)
 		return
 	}
+
+	// Read optional width/height; default to 512px for each dimension
+	q := r.URL.Query()
+	maxW, _ := strconv.Atoi(q.Get("w"))
+	maxH, _ := strconv.Atoi(q.Get("h"))
+	if maxW <= 0 {
+		maxW = 512
+	}
+	if maxH <= 0 {
+		maxH = 512
+	}
+
+	// Fast path: only read config to decide if resize is needed
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(imgBytes))
+	if err != nil {
+		// If config fails (corrupt?), fallback to serving as JPEG after decode attempt
+		format = "jpeg"
+	}
+
+	// If already small enough, serve original (preserve original content type if detectable)
+	if err == nil && cfg.Width <= maxW && cfg.Height <= maxH {
+		ct := contentTypeFromFormat(format, imgBytes)
+		w.Header().Set("Content-Type", ct)
+		// Optional caching
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Write(imgBytes)
+		return
+	}
+
+	// Decode full image
+	src, format, err := image.Decode(bytes.NewReader(imgBytes))
+	if err != nil {
+		http.Error(w, "Failed to decode image", http.StatusInternalServerError)
+		return
+	}
+
+	// Compute scaled size while keeping aspect ratio
+	dstW, dstH := fitWithin(src.Bounds().Dx(), src.Bounds().Dy(), maxW, maxH)
+
+	// Resize using high-quality resampling
+	dst := image.NewRGBA(image.Rect(0, 0, dstW, dstH))
+	draw.ApproxBiLinear.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Over, nil)
+
+	// Encode as JPEG for bandwidth efficiency
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 80}); err != nil {
+		http.Error(w, "Failed to encode image", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "image/jpeg")
-	w.Write(img)
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Write(buf.Bytes())
+}
+
+// fitWithin keeps aspect ratio while fitting within maxW x maxH
+func fitWithin(w, h, maxW, maxH int) (int, int) {
+	if w <= 0 || h <= 0 {
+		return maxW, maxH
+	}
+	rw := float64(maxW) / float64(w)
+	rh := float64(maxH) / float64(h)
+	scale := rw
+	if rh < rw {
+		scale = rh
+	}
+	if scale > 1 {
+		// Don't upscale
+		return w, h
+	}
+	return int(float64(w) * scale), int(float64(h) * scale)
+}
+
+func contentTypeFromFormat(format string, data []byte) string {
+	switch format {
+	case "jpeg", "jpg":
+		return "image/jpeg"
+	case "png":
+		return "image/png"
+	case "gif":
+		return "image/gif"
+	default:
+		// Try sniffing; fallback to jpeg if unknown
+		if len(data) >= 512 {
+			return http.DetectContentType(data[:512])
+		}
+		return "image/jpeg"
+	}
 }
 
 func getSortOrder() string {
