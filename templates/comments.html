@@ -1,0 +1,13 @@
+<div>
+  {{if .}}
+  {{range .}}
+  <div class="mb-2">
+    {{if .IsUpvote}}<span style="color:green">👍</span>{{else}}<span style="color:red">👎</span>{{end}}
+    <span>{{.Text}}</span>
+    <div class="small text-muted">{{.Created}}</div>
+  </div>
+  {{end}}
+  {{else}}
+  <div>No comments yet.</div>
+  {{end}}
+</div>

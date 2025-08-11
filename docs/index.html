@@ -1,0 +1,231 @@
+<!doctype html>
+<html>
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>MacuRate</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body {
+      padding: 1rem;
+    }
+
+    .card-person {
+      width: 240px;
+      margin: 10px;
+      text-align: center;
+      display: inline-block;
+      vertical-align: top;
+    }
+
+    .card-person img {
+      max-width: 100%;
+      height: 160px;
+      object-fit: cover;
+    }
+
+    .vote-btn {
+      width: 33%;
+    }
+
+    .comment {
+      border-bottom: 1px solid #eee;
+      padding: 6px;
+      text-align: left;
+    }
+
+    .small-muted {
+      font-size: .8rem;
+      color: #666;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1>MacuRate</h1>
+    <div>
+      <a id="adminLink" class="btn btn-outline-primary" target="_blank" href="/admin">Admin</a>
+    </div>
+  </div>
+
+  <div id="peopleWrap" class="d-flex flex-wrap"></div>
+
+  <!-- Vote Modal -->
+  <div class="modal fade" id="voteModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <form id="voteForm" class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="voteModalTitle">Add comment</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="votePersonId" name="id">
+          <input type="hidden" id="voteDirection" name="direction">
+          <div class="mb-3">
+            <label id="votePersonLabel" class="form-label"></label>
+            <textarea id="voteComment" name="comment" class="form-control" rows="3" required
+              placeholder="Write your comment..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" type="button" data-bs-dismiss="modal">Cancel</button>
+          <button class="btn btn-primary" type="submit">Submit</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Comments Modal -->
+  <div class="modal fade" id="commentsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="commentsModalTitle">Comments</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div id="commentsList"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    // CONFIG: change this to your Render / backend URL after deploy.
+    // For local testing keep as http://localhost:8080
+    const BACKEND_URL = 'http://localhost:8080';
+
+    const voteModal = new bootstrap.Modal(document.getElementById('voteModal'));
+    const commentsModal = new bootstrap.Modal(document.getElementById('commentsModal'));
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+    }
+
+    async function fetchPeople() {
+      const res = await fetch(BACKEND_URL + '/api/people');
+      if (!res.ok) throw new Error('Could not fetch people');
+      return await res.json();
+    }
+
+    function buildCard(p) {
+      const div = document.createElement('div');
+      div.className = 'card card-person';
+      div.innerHTML = `
+      <div class="card-body">
+        <h5 class="card-title">${escapeHtml(p.name)}</h5>
+        <img src="${escapeHtml(p.photo)}" alt="${escapeHtml(p.name)}" class="mb-2">
+        <p>Score: <strong>${p.score}</strong></p>
+        <div class="d-flex">
+          <button class="btn btn-success vote-btn" data-id="${p.id}" data-name="${escapeHtml(p.name)}">⬆</button>
+          <button class="btn btn-danger vote-btn" data-id="${p.id}" data-name="${escapeHtml(p.name)}">⬇</button>
+          <button class="btn btn-secondary vote-btn" data-id="${p.id}" data-name="${escapeHtml(p.name)}">💬</button>
+        </div>
+      </div>`;
+      const up = div.querySelector('.btn-success');
+      const down = div.querySelector('.btn-danger');
+      const comm = div.querySelector('.btn-secondary');
+
+      up.addEventListener('click', () => openVoteModal(p.id, p.name, 'up'));
+      down.addEventListener('click', () => openVoteModal(p.id, p.name, 'down'));
+      comm.addEventListener('click', () => openCommentsModal(p.id, p.name));
+      return div;
+    }
+
+    async function renderPeople() {
+      const wrap = document.getElementById('peopleWrap');
+      wrap.innerHTML = '<p class="text-muted">Loading…</p>';
+      try {
+        const people = await fetchPeople();
+        wrap.innerHTML = '';
+        if (!people || people.length === 0) {
+          wrap.innerHTML = '<p>No people yet.</p>';
+          return;
+        }
+        people.forEach(p => wrap.appendChild(buildCard(p)));
+      } catch (e) {
+        wrap.innerHTML = '<p class="text-danger">Could not load people. Check BACKEND_URL and CORS.</p>';
+        console.error(e);
+      }
+    }
+
+    function openVoteModal(id, name, direction) {
+      document.getElementById('votePersonId').value = id;
+      document.getElementById('voteDirection').value = direction;
+      document.getElementById('votePersonLabel').textContent = (direction === 'up' ? 'Upvoting: ' : 'Downvoting: ') + name;
+      document.getElementById('voteModalTitle').textContent = (direction === 'up' ? 'Upvote and comment' : 'Downvote and comment');
+      document.getElementById('voteComment').value = '';
+      voteModal.show();
+    }
+
+    document.getElementById('voteForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const id = document.getElementById('votePersonId').value;
+      const direction = document.getElementById('voteDirection').value;
+      const comment = document.getElementById('voteComment').value;
+      if (!comment || !comment.trim()) {
+        alert('Please write a comment.');
+        return;
+      }
+      // send form-data so server accepts it
+      const fd = new FormData();
+      fd.append('id', id);
+      fd.append('direction', direction);
+      fd.append('comment', comment);
+
+      try {
+        const res = await fetch(BACKEND_URL + '/api/vote', {
+          method: 'POST',
+          body: fd
+        });
+        if (!res.ok) throw new Error('vote failed');
+        voteModal.hide();
+        await renderPeople();
+      } catch (e) {
+        alert('Could not submit vote. Check console for details.');
+        console.error(e);
+      }
+    });
+
+    async function openCommentsModal(id, name) {
+      document.getElementById('commentsModalTitle').textContent = 'Comments for ' + name;
+      const list = document.getElementById('commentsList');
+      list.innerHTML = '<p class="text-muted">Loading…</p>';
+      try {
+        // call API JSON
+        const res = await fetch(BACKEND_URL + '/api/comments?id=' + encodeURIComponent(id));
+        if (!res.ok) throw new Error('fetch failed');
+        const comments = await res.json();
+        if (!comments || comments.length === 0) {
+          list.innerHTML = '<p>No comments yet.</p>';
+        } else {
+          list.innerHTML = '';
+          comments.forEach(c => {
+            const div = document.createElement('div');
+            div.className = 'comment';
+            const icon = c.upvote ? '<span style="color:green">👍</span>' : '<span style="color:red">👎</span>';
+            const dateShown = c.created_at ? ('<div class="small-muted">' + escapeHtml(c.created_at) + '</div>') : '';
+            div.innerHTML = icon + ' ' + escapeHtml(c.text) + dateShown;
+            list.appendChild(div);
+          });
+        }
+      } catch (e) {
+        list.innerHTML = '<p class="text-danger">Could not load comments.</p>';
+        console.error(e);
+      }
+      commentsModal.show();
+    }
+
+    (async () => {
+      // update admin link to point at backend admin
+      document.getElementById('adminLink').href = BACKEND_URL + '/admin';
+      await renderPeople();
+    })();
+  </script>
+</body>
+
+</html>

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <title>MacuRate</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    .card {
+      width: 250px;
+      margin: 15px;
+      display: inline-block;
+      vertical-align: top;
+    }
+
+    .vote-btn {
+      width: 100%;
+      margin-top: 5px;
+    }
+
+    .upvote {
+      background-color: #28a745;
+      color: white;
+    }
+
+    .downvote {
+      background-color: #dc3545;
+      color: white;
+    }
+
+    .comment-btn {
+      background-color: #6c757d;
+      color: white;
+    }
+  </style>
+</head>
+
+<body class="p-3">
+  <h1 class="mb-4">MacuRate</h1>
+  <a href="/admin" class="btn btn-warning mb-3">Admin Login</a>
+  <div>
+    {{range .}}
+    <div class="card">
+      <div class="card-body text-center">
+        <h5>{{.Name}}</h5>
+        <img src="{{.Photo}}" alt="{{.Name}}" style="width:100%; height:200px; object-fit:cover;">
+        <p class="mt-2">Score: {{.Score}}</p>
+        <button class="btn upvote vote-btn" data-bs-toggle="modal" data-bs-target="#voteModal" data-id="{{.ID}}"
+          data-direction="up">⬆ Upvote</button>
+        <button class="btn downvote vote-btn" data-bs-toggle="modal" data-bs-target="#voteModal" data-id="{{.ID}}"
+          data-direction="down">⬇ Downvote</button>
+        <button class="btn comment-btn vote-btn" data-bs-toggle="modal" data-bs-target="#commentsModal"
+          data-id="{{.ID}}">💬 Comments</button>
+      </div>
+    </div>
+    {{end}}
+  </div>
+
+  <!-- Vote Modal -->
+  <div class="modal fade" id="voteModal" tabindex="-1">
+    <div class="modal-dialog">
+      <form method="POST" action="/vote" class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Leave a Comment</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" name="id" id="votePersonId">
+          <input type="hidden" name="direction" id="voteDirection">
+          <textarea name="comment" class="form-control" placeholder="Write your comment here..." required></textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="submit" class="btn btn-primary">Submit</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Comments Modal -->
+  <div class="modal fade" id="commentsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Comments</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body" id="commentsList">
+          Loading comments...
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    var voteModal = document.getElementById('voteModal');
+    voteModal.addEventListener('show.bs.modal', function (event) {
+      var button = event.relatedTarget;
+      document.getElementById('votePersonId').value = button.getAttribute('data-id');
+      document.getElementById('voteDirection').value = button.getAttribute('data-direction');
+    });
+
+    var commentsModal = document.getElementById('commentsModal');
+    commentsModal.addEventListener('show.bs.modal', function (event) {
+      var button = event.relatedTarget;
+      var id = button.getAttribute('data-id');
+      fetch('/comments?id=' + id)
+        .then(res => res.text())
+        .then(html => {
+          document.getElementById('commentsList').innerHTML = html;
+        });
+    });
+  </script>
+</body>
+
+</html>
