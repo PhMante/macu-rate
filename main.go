@@ -13,6 +13,7 @@ import (
 	"strconv"
 
 	_ "github.com/lib/pq"
+	"github.com/rwcarlsen/goexif/exif"
 	"golang.org/x/image/draw"
 )
 
@@ -226,6 +227,77 @@ func commentsHandler(w http.ResponseWriter, r *http.Request) {
 	template.Must(template.New("comments").Parse(tmpl)).Execute(w, comments)
 }
 
+func applyEXIFOrientation(img image.Image, orientation int) image.Image {
+	switch orientation {
+	case 1:
+		return img
+	case 2: // mirror horizontal
+		return flipHorizontal(img)
+	case 3: // rotate 180
+		return rotate180(img)
+	case 4: // mirror vertical
+		return flipVertical(img)
+	case 5: // mirror horizontal + rotate 270 CW (transpose)
+		return rotate90CW(flipHorizontal(img))
+	case 6: // rotate 90 CW
+		return rotate90CW(img)
+	case 7: // mirror horizontal + rotate 90 CW (transverse)
+		return rotate270CW(flipHorizontal(img))
+	case 8: // rotate 270 CW
+		return rotate270CW(img)
+	default:
+		return img
+	}
+}
+
+// Helpers for transforms
+func flipHorizontal(src image.Image) image.Image {
+	b := src.Bounds()
+	dst := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			dst.Set(b.Max.X-1-(x-b.Min.X), y-b.Min.Y, src.At(x, y))
+		}
+	}
+	return dst
+}
+func flipVertical(src image.Image) image.Image {
+	b := src.Bounds()
+	dst := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			dst.Set(x-b.Min.X, b.Max.Y-1-(y-b.Min.Y), src.At(x, y))
+		}
+	}
+	return dst
+}
+func rotate180(src image.Image) image.Image {
+	return rotate90CW(rotate90CW(src))
+}
+func rotate90CW(src image.Image) image.Image {
+	b := src.Bounds()
+	w, h := b.Dx(), b.Dy()
+	dst := image.NewRGBA(image.Rect(0, 0, h, w))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			dst.Set(h-1-y, x, src.At(b.Min.X+x, b.Min.Y+y))
+		}
+	}
+	return dst
+}
+func rotate270CW(src image.Image) image.Image {
+	// 270 CW = 90 CCW
+	b := src.Bounds()
+	w, h := b.Dx(), b.Dy()
+	dst := image.NewRGBA(image.Rect(0, 0, h, w))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			dst.Set(y, w-1-x, src.At(b.Min.X+x, b.Min.Y+y))
+		}
+	}
+	return dst
+}
+
 func imageHandler(w http.ResponseWriter, r *http.Request) {
 	idStr := r.URL.Path[len("/images/"):]
 	id, _ := strconv.Atoi(idStr)
@@ -237,10 +309,10 @@ func imageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Detect image format
+	// Detect format via DecodeConfig
 	cfg, format, cfgErr := image.DecodeConfig(bytes.NewReader(imgBytes))
 	if cfgErr != nil {
-		// If we can't decode config, try to stream as-is with sniffed content type
+		// Unknown data: just stream as-is with sniffed type
 		ct := "application/octet-stream"
 		if len(imgBytes) >= 512 {
 			ct = http.DetectContentType(imgBytes[:512])
@@ -251,15 +323,26 @@ func imageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If not JPEG, serve original bytes as-is.
+	// Non-JPEGs: serve original bytes unchanged
 	if format != "jpeg" && format != "jpg" {
-		w.Header().Set("Content-Type", contentTypeFromFormat(format, imgBytes))
+		ct := contentTypeFromFormat(format, imgBytes)
+		w.Header().Set("Content-Type", ct)
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		w.Write(imgBytes)
 		return
 	}
 
-	// JPEG: allow downscaling
+	// JPEG path: honor EXIF orientation
+	orientation := 1
+	if ex, err := exif.Decode(bytes.NewReader(imgBytes)); err == nil {
+		if tag, err := ex.Get(exif.Orientation); err == nil && tag != nil {
+			if v, err := tag.Int(0); err == nil && v >= 1 && v <= 8 {
+				orientation = v
+			}
+		}
+	}
+
+	// Target size from query (defaults)
 	q := r.URL.Query()
 	maxW, _ := strconv.Atoi(q.Get("w"))
 	maxH, _ := strconv.Atoi(q.Get("h"))
@@ -270,34 +353,41 @@ func imageHandler(w http.ResponseWriter, r *http.Request) {
 		maxH = 512
 	}
 
-	// If already small enough, serve original
-	if cfg.Width <= maxW && cfg.Height <= maxH {
+	// If already small enough and orientation is normal, stream original
+	if cfg.Width <= maxW && cfg.Height <= maxH && orientation == 1 {
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		w.Write(imgBytes)
 		return
 	}
 
-	// Decode and resize only for JPEG
+	// Decode full image
 	src, _, err := image.Decode(bytes.NewReader(imgBytes))
 	if err != nil {
 		http.Error(w, "Failed to decode image", http.StatusInternalServerError)
 		return
 	}
 
+	// Apply EXIF orientation before resizing
+	src = applyEXIFOrientation(src, orientation)
+
+	// Compute scaled size
 	dstW, dstH := fitWithin(src.Bounds().Dx(), src.Bounds().Dy(), maxW, maxH)
+
+	// Resize with high-quality resampling
 	dst := image.NewRGBA(image.Rect(0, 0, dstW, dstH))
 	draw.ApproxBiLinear.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Over, nil)
 
-	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 80}); err != nil {
+	// Encode as JPEG
+	var out bytes.Buffer
+	if err := jpeg.Encode(&out, dst, &jpeg.Options{Quality: 80}); err != nil {
 		http.Error(w, "Failed to encode image", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
-	w.Write(buf.Bytes())
+	w.Write(out.Bytes())
 }
 
 // fitWithin keeps aspect ratio while fitting within maxW x maxH
