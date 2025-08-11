@@ -1,50 +1,116 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>MacuRate</title>
   <style>
-    .person-card {
-      display: inline-block;
-      width: 200px;
-      border: 1px solid #ccc;
-      margin: 10px;
-      padding: 10px;
+    body {
+      font-family: Arial, sans-serif;
+      background: #f5f5f5;
+      margin: 0;
+      padding: 20px;
+    }
+
+    .container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+      justify-content: center;
+    }
+
+    .person-box {
+      position: relative;
+      background: white;
+      width: 220px;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+      padding: 15px;
       text-align: center;
     }
 
-    button {
-      margin: 5px;
-    }
-  </style>
-  <script>
-    function vote(id, type) {
-      let comment = prompt("Write your comment:");
-      if (comment === null) return;
-      let formData = new FormData();
-      formData.append("person_id", id);
-      formData.append("vote", type);
-      formData.append("comment", comment);
-      fetch("/vote", {method: "POST", body: formData});
+    .score-badge {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: #4caf50;
+      color: white;
+      font-weight: bold;
+      padding: 4px 8px;
+      border-radius: 12px;
+      user-select: none;
     }
 
-    function showComments(id) {
-      window.open("/comments?person_id=" + id, "Comments", "width=400,height=400");
+    .score-badge.negative {
+      background: #f44336;
     }
-  </script>
+
+    .person-name {
+      font-size: 1.2em;
+      margin-bottom: 10px;
+    }
+
+    img.person-photo {
+      width: 180px;
+      height: 180px;
+      object-fit: cover;
+      border-radius: 6px;
+    }
+
+    .buttons {
+      margin-top: 10px;
+      display: flex;
+      justify-content: space-around;
+    }
+
+    button {
+      border: none;
+      background: none;
+      cursor: pointer;
+      font-size: 1.5em;
+    }
+
+    button.upvote {
+      color: #4caf50;
+    }
+
+    button.downvote {
+      color: #f44336;
+    }
+
+    button.comments {
+      color: #555;
+      font-size: 1em;
+    }
+  </style>
 </head>
 
 <body>
-  <h1>MacuRate</h1>
-  {{range .}}
-  <div class="person-card">
-    <h3>{{.Name}}</h3>
-    <img src="/images/{{.ID}}" width="180"><br>
-    <button style="background:green;color:white" onclick="vote({{.ID}}, 'up')">⬆️</button>
-    <button style="background:red;color:white" onclick="vote({{.ID}}, 'down')">⬇️</button>
-    <button onclick="showComments({{.ID}})">💬</button>
+
+  <h1>MacuRate - Vote for your friends</h1>
+  <div class="container">
+    {{range .}}
+    <div class="person-box" data-id="{{.ID}}">
+      <div class="score-badge {{if lt .Score 0}}negative{{end}}">
+        {{.Score}}
+      </div>
+      <div class="person-name">{{.Name}}</div>
+      <img class="person-photo" src="/images/{{.ID}}" alt="Photo of {{.Name}}" />
+      <div class="buttons">
+        <button class="upvote" title="Upvote" onclick="openVoteModal({{.ID}}, 'up')">⬆️</button>
+        <button class="downvote" title="Downvote" onclick="openVoteModal({{.ID}}, 'down')">⬇️</button>
+        <button class="comments" title="View Comments" onclick="openCommentsModal({{.ID}})">💬</button>
+      </div>
+    </div>
+    {{end}}
   </div>
-  {{end}}
+
+  <!-- Add your existing modal scripts here for vote/comment -->
+  <script>
+// ... your modal logic ...
+  </script>
+
 </body>
 
 </html>

@@ -195,4 +195,41 @@ func imageHandler(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "image/jpeg")
     w.Write(img)
 }
+func homeHandler(w http.ResponseWriter, r *http.Request) {
+    // First, get all people with their vote scores
+    type Person struct {
+        ID    int
+        Name  string
+        Score int
+    }
+
+    rows, err := db.Query(`
+        SELECT p.id, p.name, 
+               COALESCE(SUM(CASE WHEN v.upvote THEN 1 ELSE -1 END), 0) AS score
+        FROM people p
+        LEFT JOIN votes v ON p.id = v.person_id
+        GROUP BY p.id, p.name
+        ORDER BY p.name
+    `)
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+    defer rows.Close()
+
+    var people []Person
+    for rows.Next() {
+        var p Person
+        if err := rows.Scan(&p.ID, &p.Name, &p.Score); err != nil {
+            http.Error(w, err.Error(), http.StatusInternalServerError)
+            return
+        }
+        people = append(people, p)
+    }
+
+    tmpl := template.Must(template.ParseFiles("templates/index.html"))
+    if err := tmpl.Execute(w, people); err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+    }
+}
 
