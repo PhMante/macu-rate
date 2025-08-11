@@ -6,10 +6,49 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>MacuRate</title>
   <style>
+    .navbar {
+      background-color: #fff;
+      padding: 10px 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center; /* Center navbar content */
+      margin-bottom: 0px;
+    }
+
+    .navbar-brand {
+      display: flex;
+      align-items: center;
+    }
+
+    .navbar-text {
+      font-size: 2em; /* Bigger text */
+      font-weight: bold;
+      color: #333;
+    }
+
+    .logo-container {
+      width: 100px; /* Bigger logo */
+      height: 100px;
+      border-radius: 50%;
+      overflow: hidden;
+      border: 3px solid #ddd;
+      margin: 0 20px; /* Space around the logo */
+    }
+
+    .logo {
+      width: 100%;
+      height: auto;
+    }
+
     body {
       font-family: Arial, sans-serif;
       background: #f5f5f5;
       margin: 0;
+      padding: 0; /* Adjusted for full-width navbar */
+    }
+    
+    .main-content {
       padding: 20px;
     }
 
@@ -102,7 +141,18 @@
 
 <body>
 
-  <h1>MacuRate - Vote for your friends</h1>
+  <nav class="navbar">
+    <div class="navbar-brand">
+      <span class="navbar-text">Macu</span>
+      <div class="logo-container">
+        <img src="macu-rate/static/images/logo.jpg" alt="MacuRate Logo" class="logo">
+      </div>
+      <span class="navbar-text">Rate</span>
+    </div>
+  </nav>
+
+  <div class="main-content">
+    <h1 style="text-align: center;">Vote for your friends!</h1>
   <div class="container">
     {{range .}}
     <div class="person-box" data-id="{{.ID}}">
@@ -119,6 +169,7 @@
     </div>
     {{end}}
   </div>
+</div>
 
   <!-- Add your existing modal scripts here for vote/comment -->
   <script>
