@@ -8,12 +8,13 @@
   <style>
     .navbar {
       background-color: #fff;
-      padding: 10px 20px;
+      padding: 20px 20px 20px 20px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
       display: flex;
       align-items: center;
       justify-content: center; /* Center navbar content */
       margin-bottom: 0px;
+      position: relative;
     }
 
     .navbar-brand {
@@ -27,18 +28,37 @@
       color: #333;
     }
 
+    .logo-section {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin: 0 20px;
+    }
+
     .logo-container {
       width: 100px; /* Bigger logo */
-      height: 100px;
+      height: auto;
       border-radius: 50%;
-      overflow: hidden;
+      overflow: visible;
       border: 3px solid #ddd;
-      margin: 0 20px; /* Space around the logo */
+      display: flex;
+      flex-direction: column;
+      align-items: center;
     }
 
     .logo {
-      width: 100%;
-      height: auto;
+      width: 100px;
+      height: 100px;
+      object-fit: cover;
+      border-radius: 50%;
+    }
+
+    .logo-subtext {
+      margin: 5px 0 0 0;
+      font-size: 0.8em;
+      color: #666;
+      text-align: center;
+      font-style: italic;
     }
 
     body {
@@ -136,6 +156,26 @@
       color: #555;
       font-size: 1em;
     }
+
+    .person-box.paolone {
+      background: linear-gradient(45deg, #ffd700, #ffed4e, #ffd700, #ffed4e);
+      background-size: 400% 400%;
+      animation: goldShine 2s ease-in-out infinite;
+      box-shadow: 0 0 20px rgba(255, 215, 0, 0.6), 0 2px 5px rgba(0, 0, 0, 0.15);
+      border: 2px solid #ffd700;
+    }
+
+    @keyframes goldShine {
+      0% {
+        background-position: 0% 50%;
+      }
+      50% {
+        background-position: 100% 50%;
+      }
+      100% {
+        background-position: 0% 50%;
+      }
+    }
   </style>
 </head>
 
@@ -144,8 +184,11 @@
   <nav class="navbar">
     <div class="navbar-brand">
       <span class="navbar-text">Macu</span>
-      <div class="logo-container">
-        <img src="macu-rate/static/images/logo.jpg" alt="MacuRate Logo" class="logo">
+      <div class="logo-section">
+        <div class="logo-container">
+          <img src="logo.jpg" alt="MacuRate Logo" class="logo">
+        </div>
+        <p class="logo-subtext">- 2025 edition -</p>
       </div>
       <span class="navbar-text">Rate</span>
     </div>
@@ -173,6 +216,17 @@
 
   <!-- Add your existing modal scripts here for vote/comment -->
   <script>
+    // Add gold effect for Paolone
+    document.addEventListener('DOMContentLoaded', function() {
+      const personBoxes = document.querySelectorAll('.person-box');
+      personBoxes.forEach(function(box) {
+        const nameElement = box.querySelector('.person-name');
+        if (nameElement && nameElement.textContent.trim() === 'Paolone') {
+          box.classList.add('paolone');
+        }
+      });
+    });
+
     function openVoteModal(personID, voteType) {
       const comment = prompt(`Write a comment for your ${voteType}vote:`)
       if (comment === null) return // user cancelled
