@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>MacuRate</title>
+  <style>
+    .person-card {
+      display: inline-block;
+      width: 200px;
+      border: 1px solid #ccc;
+      margin: 10px;
+      padding: 10px;
+      text-align: center;
+    }
+
+    button {
+      margin: 5px;
+    }
+  </style>
+  <script>
+    function vote(id, type) {
+      let comment = prompt("Write your comment:");
+      if (comment === null) return;
+      let formData = new FormData();
+      formData.append("person_id", id);
+      formData.append("vote", type);
+      formData.append("comment", comment);
+      fetch("/vote", {method: "POST", body: formData});
+    }
+
+    function showComments(id) {
+      window.open("/comments?person_id=" + id, "Comments", "width=400,height=400");
+    }
+  </script>
+</head>
+
+<body>
+  <h1>MacuRate</h1>
+  {{range .}}
+  <div class="person-card">
+    <h3>{{.Name}}</h3>
+    <img src="/images/{{.ID}}" width="180"><br>
+    <button style="background:green;color:white" onclick="vote({{.ID}}, 'up')">⬆️</button>
+    <button style="background:red;color:white" onclick="vote({{.ID}}, 'down')">⬇️</button>
+    <button onclick="showComments({{.ID}})">💬</button>
+  </div>
+  {{end}}
+</body>
+
+</html>
