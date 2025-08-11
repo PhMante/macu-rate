@@ -2,17 +2,44 @@
 <html>
 
 <head>
-  <title>MacuRate Admin</title>
+    <title>MacuRate Admin</title>
+    <style>
+        .row { margin-bottom: 16px; }
+        .btn { padding: 8px 12px; margin-right: 8px; }
+    </style>
 </head>
 
 <body>
-  <h1>Add Person</h1>
-  <form action="/admin/add" method="POST" enctype="multipart/form-data">
-    <input type="hidden" name="pass" value="MacuRateAdmin2025">
+<h1>Add Person</h1>
+<form action="/admin/add" method="POST" enctype="multipart/form-data">
+    <input type="hidden" name="pass" value="{{.AdminPass}}">
     Name: <input type="text" name="name" required><br>
     Image: <input type="file" name="image" accept="image/*" required><br>
     <input type="submit" value="Add Person">
-  </form>
+</form>
+
+<hr>
+
+<h2>Sort Order</h2>
+<div class="row">
+    <form action="/admin/sort" method="POST" style="display:inline;">
+        <input type="hidden" name="pass" value="{{.AdminPass}}">
+        <input type="hidden" name="order" value="name">
+        <button class="btn" type="submit">Alphabetical (A–Z)</button>
+    </form>
+
+    <form action="/admin/sort" method="POST" style="display:inline;">
+        <input type="hidden" name="pass" value="{{.AdminPass}}">
+        <input type="hidden" name="order" value="score_desc">
+        <button class="btn" type="submit">By Score (High → Low)</button>
+    </form>
+
+    <form action="/admin/sort" method="POST" style="display:inline;">
+        <input type="hidden" name="pass" value="{{.AdminPass}}">
+        <input type="hidden" name="order" value="upvotes_desc">
+        <button class="btn" type="submit">By Positive Votes (High → Low)</button>
+    </form>
+</div>
 </body>
 
 </html>
