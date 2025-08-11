@@ -108,8 +108,13 @@ func adminHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tmpl := template.Must(template.ParseFiles("templates/admin.html"))
-	// Optionally pass current sort order if you update the template to show it.
-	tmpl.Execute(w, nil)
+	// Provide the pass to the template so hidden inputs have the correct value
+	data := map[string]string{
+		"AdminPass": pass,
+	}
+	if err := tmpl.Execute(w, data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func adminAddHandler(w http.ResponseWriter, r *http.Request) {
@@ -263,11 +268,25 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 		orderByClause = "p.name"
 	}
 
+	// IMPORTANT: Handle NULLs from the LEFT JOIN as 0, not -1
+	// - Score:  +1 for true, -1 for false, 0 for NULL
+	// - Upvotes: +1 for true, 0 otherwise (including NULL)
 	query := `
         SELECT p.id,
                p.name,
-               COALESCE(SUM(CASE WHEN v.upvote THEN 1 ELSE -1 END), 0) AS score,
-               COALESCE(SUM(CASE WHEN v.upvote THEN 1 ELSE 0 END), 0)   AS upvotes
+               COALESCE(SUM(
+                   CASE
+                     WHEN v.upvote IS TRUE  THEN 1
+                     WHEN v.upvote IS FALSE THEN -1
+                     ELSE 0
+                   END
+               ), 0) AS score,
+               COALESCE(SUM(
+                   CASE
+                     WHEN v.upvote IS TRUE THEN 1
+                     ELSE 0
+                   END
+               ), 0) AS upvotes
         FROM people p
         LEFT JOIN votes v ON p.id = v.person_id
         GROUP BY p.id, p.name
