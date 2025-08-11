@@ -131,15 +131,38 @@
     }
 
     function openCommentsModal(personID) {
+      const modal = document.getElementById('commentsModal');
+      const content = document.getElementById('commentsContent');
+      content.innerHTML = 'Loading comments...';
+      modal.style.display = 'flex';
+
       fetch(`/comments?person_id=${personID}`)
         .then(res => res.text())
         .then(html => {
-          const w = window.open("", "Comments", "width=400,height=400,scrollbars=yes")
-          w.document.write(html)
-          w.document.close()
-        }).catch(() => alert('Failed to load comments'))
+          content.innerHTML = html;
+        })
+        .catch(() => {
+          content.innerHTML = '<p>Failed to load comments.</p>';
+        });
     }
+
+    function closeCommentsModal() {
+      document.getElementById('commentsModal').style.display = 'none';
+    }
+
   </script>
+
+
+  <div id="commentsModal" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; 
+  background:rgba(0,0,0,0.6); justify-content:center; align-items:center; z-index:1000;">
+    <div
+      style="background:#fff; max-width:400px; width:90%; max-height:80vh; overflow-y:auto; border-radius:8px; padding:20px; position:relative;">
+      <button onclick="closeCommentsModal()"
+        style="position:absolute; top:10px; right:10px; background:none; border:none; font-size:20px; cursor:pointer;">✖</button>
+      <h3>Comments</h3>
+      <div id="commentsContent">Loading comments...</div>
+    </div>
+  </div>
 
 </body>
 
