@@ -72,30 +72,6 @@ func createTables() {
         log.Fatal(err)
     }
 }
-
-func homeHandler(w http.ResponseWriter, r *http.Request) {
-    rows, err := db.Query("SELECT id, name FROM people")
-    if err != nil {
-        http.Error(w, err.Error(), 500)
-        return
-    }
-    defer rows.Close()
-
-    type Person struct {
-        ID   int
-        Name string
-    }
-    var people []Person
-    for rows.Next() {
-        var p Person
-        rows.Scan(&p.ID, &p.Name)
-        people = append(people, p)
-    }
-
-    tmpl := template.Must(template.ParseFiles("templates/index.html"))
-    tmpl.Execute(w, people)
-}
-
 func adminHandler(w http.ResponseWriter, r *http.Request) {
     pass := r.URL.Query().Get("pass")
     if pass != adminPassword {
